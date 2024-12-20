@@ -1,0 +1,79 @@
+---
+- name: Install Jenkins and dependencies
+  hosts: all
+  become: true
+ 
+  tasks:
+    - name: Update APT package list
+      apt:
+        update_cache: yes
+
+    - name: Install fontconfig and OpenJDK 17
+      apt:
+        name:
+          - fontconfig
+          - openjdk-17-jre
+        state: present
+
+    - name: Add Jenkins repository key
+      ansible.builtin.get_url:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+        dest: /usr/share/keyrings/jenkins-keyring.asc
+
+    - name: Add Jenkins repository
+      ansible.builtin.lineinfile:
+        path: /etc/apt/sources.list.d/jenkins.list
+        line: "deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/"
+        create: yes
+
+    - name: Update APT package list after adding Jenkins repo
+      apt:
+        update_cache: yes
+
+    - name: Install Jenkins
+      apt:
+        name: jenkins
+        state: present
+
+    - name: Fetch initial admin password
+      slurp:
+        src: /var/lib/jenkins/secrets/initialAdminPassword
+      register: admin_password
+
+    - name: Save admin password to a local file
+      copy:
+        content: "{{ admin_password['content'] | b64decode }}"
+        dest: ./admin_password.txt
+
+    - name: Download Jenkins CLI jar
+      ansible.builtin.get_url:
+        url: "http://{{ ansible_host }}:8080/jnlpJars/jenkins-cli.jar"
+        dest: "/usr/local/bin/jenkins-cli.jar"
+        mode: '0755'
+
+    - name: Verify Jenkins CLI jar
+      ansible.builtin.stat:
+        path: "/usr/local/bin/jenkins-cli.jar"
+      register: cli_jar_stat
+
+    # - name: Test Jenkins CLI command
+    #   ansible.builtin.shell: |
+    #     java -jar "/usr/local/bin/jenkins-cli.jar" -s http://"{{ ansible_host }}":8080 who-am-i --username "admin" --password "{{admin_password}}"
+    #   register: cli_test
+    #   failed_when: "'Authenticated as' not in cli_test.stdout"
+    #   changed_when: false
+    
+    - name: Install Jenkins plugins
+      command: >
+        java -jar /var/cache/jenkins/war/WEB-INF/jenkins-cli.jar
+        -s http://"{{ ansible_host }}":8080
+        -auth admin:{{ admin_password }}
+        install-plugin {{ item }}
+      with_items:
+        - git
+        - job-dsl
+        - pipeline
+        - terraform
+      notify:
+        - Restart Jenkins
+    

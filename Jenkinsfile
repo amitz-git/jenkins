@@ -9,22 +9,16 @@ pipeline {
                 echo 'Initializing because changes were detected...'
             }
         }
-    }
-    stages {
         stage('Validate') {
             steps {
                 echo 'Validating because changes were detected...'
             }
         }
-    }
-    stages {
         stage('Plan') {
             steps {
                 echo 'Plan because changes were detected...'
             }
         }
-    }
-    stages {
         stage('Apply') {
             steps {
                 echo 'Applying because changes were detected...'

@@ -4,9 +4,30 @@ pipeline {
         pollSCM('H/15 * * * *') // Poll every 15 minutes
     }
     stages {
-        stage('Build') {
+        stage('Initialize') {
             steps {
-                echo 'Building because changes were detected...'
+                echo 'Initializing because changes were detected...'
+            }
+        }
+    }
+    stages {
+        stage('Validate') {
+            steps {
+                echo 'Validating because changes were detected...'
+            }
+        }
+    }
+    stages {
+        stage('Plan') {
+            steps {
+                echo 'Plan because changes were detected...'
+            }
+        }
+    }
+    stages {
+        stage('Apply') {
+            steps {
+                echo 'Applying because changes were detected...'
             }
         }
     }

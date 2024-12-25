@@ -37,15 +37,19 @@ pipeline {
                             input message: "Do you want to apply the plan?",
                             parameters: [text(name: 'Plan', description: 'Please review the plan', defaultValue: plan)]
                         }
-
-                        sh 'terraform ${action} -input=false tfplan'
+                        sh 'terraform apply -input=false tfplan'
                     } else if (params.action == 'destroy') {
-                        sh 'terraform ${action} --auto-approve'
+                        if (!params.autoApprove) {
+                            input message: "Are you sure you want to destroy?",
+                            parameters: [booleanParam(defaultValue: false, description: 'Confirm destroy', name: 'confirmDestroy')]
+                        }
+                        sh 'terraform destroy -auto-approve'
                     } else {
                         error "Invalid action selected. Please choose either 'apply' or 'destroy'."
+                            }
+                        }
                     }
                 }
-            }
         }
 
     }

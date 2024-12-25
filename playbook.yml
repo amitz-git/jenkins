@@ -2,6 +2,8 @@
 - name: Install Jenkins and dependencies
   hosts: all
   become: true
+  vars:
+    jenkins_admin_user: "admin"
  
   tasks:
     - name: Update APT package list
@@ -35,45 +37,43 @@
         name: jenkins
         state: present
 
-    - name: Fetch initial admin password
-      slurp:
-        src: /var/lib/jenkins/secrets/initialAdminPassword
-      register: admin_password
+    - name: Read the initial admin password
+      ansible.builtin.shell: cat /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_admin_password
+      failed_when: false
 
-    - name: Save admin password to a local file
-      copy:
-        content: "{{ admin_password['content'] | b64decode }}"
-        dest: ./admin_password.txt
-
-    - name: Download Jenkins CLI jar
-      ansible.builtin.get_url:
+    - name: Ensure Jenkins CLI is available
+      get_url:
         url: "http://{{ ansible_host }}:8080/jnlpJars/jenkins-cli.jar"
-        dest: "/usr/local/bin/jenkins-cli.jar"
-        mode: '0755'
+        dest: "/tmp/jenkins-cli.jar"
+      when: ansible_facts['os_family'] != 'Ubuntu'
 
-    - name: Verify Jenkins CLI jar
-      ansible.builtin.stat:
-        path: "/usr/local/bin/jenkins-cli.jar"
-      register: cli_jar_stat
+    - name: Fetch Jenkins crumb for CLI authentication
+      uri:
+        url: "http://{{ ansible_host }}:8080/crumbIssuer/api/json"
+        user: "{{ jenkins_admin_user }}"
+        password: "{{ jenkins_admin_password }}"
+        method: GET
+        return_content: yes
+      register: crumb_response
 
-    # - name: Test Jenkins CLI command
-    #   ansible.builtin.shell: |
-    #     java -jar "/usr/local/bin/jenkins-cli.jar" -s http://"{{ ansible_host }}":8080 who-am-i --username "admin" --password "{{admin_password}}"
-    #   register: cli_test
-    #   failed_when: "'Authenticated as' not in cli_test.stdout"
-    #   changed_when: false
-    
-    - name: Install Jenkins plugins
+    - name: Extract Jenkins crumb
+      set_fact:
+        jenkins_crumb: "{{ crumb_response.json.crumb }}"
+
+    - name: Update all Jenkins plugins
       command: >
-        java -jar /var/cache/jenkins/war/WEB-INF/jenkins-cli.jar
-        -s http://"{{ ansible_host }}":8080
-        -auth admin:{{ admin_password }}
+        java -jar /tmp/jenkins-cli.jar
+        -s http://{{ ansible_host }}:8080/
+        -auth {{ jenkins_admin_user }}:{{ jenkins_admin_password }}
+        -webSocket
         install-plugin {{ item }}
       with_items:
-        - git
-        - job-dsl
-        - pipeline
-        - terraform
-      notify:
-        - Restart Jenkins
-    
+        - blueocean
+      args:
+        creates: "/var/lib/jenkins/plugins/{{ item }}.hpi"
+
+    - name: Restart Jenkins to apply updates
+      service:
+        name: jenkins
+        state: restarted

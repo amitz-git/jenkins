@@ -6,22 +6,22 @@ pipeline {
     stages {
         stage('Initialize') {
             steps {
-                echo 'Initializing because changes were detected...'
+                sh 'terraform init'
             }
         }
         stage('Validate') {
             steps {
-                echo 'Validating because changes were detected...'
+                sh 'terraform validate'
             }
         }
         stage('Plan') {
             steps {
-                echo 'Plan because changes were detected...'
+                sh 'terraform plan'
             }
         }
         stage('Apply') {
             steps {
-                echo 'Applying because changes were detected...'
+                sh 'terraform apply'
             }
         }
     }

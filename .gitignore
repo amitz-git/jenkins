@@ -1,3 +1,3 @@
 *.terraform
 *.pem
-*local*
+local.tf

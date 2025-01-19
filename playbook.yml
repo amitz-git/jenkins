@@ -4,7 +4,7 @@
   become: true
   vars:
     jenkins_admin_user: "admin"
- 
+
   tasks:
     - name: Update APT package list
       apt:
@@ -36,6 +36,49 @@
       apt:
         name: jenkins
         state: present
+
+    - name: Start and enable Jenkins service
+      systemd:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Ensure Jenkins service is up and running
+      wait_for:
+        port: 8080
+        timeout: 120
+
+    - name: Copy plugins.txt file to host machine
+      ansible.builtin.copy:
+          src: plugins.txt
+          dest: /home/ubuntu/plugins.txt
+
+    - name: Install plugins using Jenkins CLI
+      command: |
+        java -jar /usr/share/jenkins/jenkins.war -s http://localhost:8080/jenkins install-plugin $(cat /home/ubuntu/plugins.txt)
+      args:
+        creates: /var/lib/jenkins/plugins
+      notify:
+        - Restart Jenkins
+
+    - name: Print Jenkins initial admin password
+      command: cat /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_password
+
+    - name: Display Jenkins initial admin password
+      debug:
+        msg: "Jenkins initial admin password is {{ jenkins_password.stdout }}"
+
+  handlers:
+    - name: Restart Jenkins
+      systemd:
+        name: jenkins
+        state: restarted
+
+
+
+
+
 
     - name: Read the initial admin password
       ansible.builtin.shell: cat /var/lib/jenkins/secrets/initialAdminPassword

@@ -3,7 +3,6 @@
   tags: common-tools
   hosts: all
   become: true
-  vars:
   tasks:
     - name: Display inventory group names
       debug:
@@ -134,7 +133,6 @@
   hosts: 
     - master
   become: true
-  vars:
   tasks:
     - name: docker pull jenkins/jenkins:lts
       community.docker.docker_image:
@@ -206,7 +204,7 @@
         ansible.builtin.command:
           cmd: "java -jar /home/ubuntu/jenkins-cli.jar -s http://localhost:8080 who-am-i"
         register: whoami
-        ignore_errors: yes
+        ignore_errors: true
         environment:
           JENKINS_USER_ID: admin
           JENKINS_API_TOKEN: "{{ result.stdout }}"
@@ -222,7 +220,7 @@
           JENKINS_USER_ID: admin
           JENKINS_API_TOKEN: "{{ result.stdout }}"
         register: plugin_install
-        ignore_errors: yes
+        ignore_errors: true
       
       - name: Jenkins Plugin Installation Result
         ansible.builtin.debug:

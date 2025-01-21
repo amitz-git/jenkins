@@ -24,69 +24,34 @@ provider "aws" {
 locals {
   region = "ap-south-2"
 
-  ami           = "ami-03aaeb1f15623d169"
+  ami           = "ami-0e386fa0b67b8b12c"
   instance_type = "t3.micro"
-  workers_count = 2
+  vm_count      = 3
+  name          = "jenkins"
+}
 
-  tags = {
-    Name = "Jenkins"
-    env  = "dev"
+# default
+# VPC
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
   }
-}
-
-#VPC
-resource "aws_vpc" "jenkins_vpc" {
-  cidr_block = "172.16.0.0/16"
-  tags       = local.tags
-}
-
-#INTERNET GATEWAY (IGW) 
-resource "aws_internet_gateway" "jenkins_igw" {
-  vpc_id = aws_vpc.jenkins_vpc.id
-
-  tags = local.tags
-}
-
-#SUBNET
-resource "aws_subnet" "jenkins_public_subnet" {
-  vpc_id                  = aws_vpc.jenkins_vpc.id
-  cidr_block              = "172.16.1.0/24"
-  map_public_ip_on_launch = true
-  tags                    = local.tags
-}
-
-# ROUTE TABLE
-resource "aws_route_table" "jenkins_route_table" {
-  vpc_id = aws_vpc.jenkins_vpc.id
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.jenkins_igw.id
-  }
-  tags = local.tags
-}
-
-# subnet attachment to ROUTE TABLE
-resource "aws_route_table_association" "jenkins_route_table_association" {
-  depends_on = [
-    aws_subnet.jenkins_public_subnet
-  ]
-  subnet_id      = aws_subnet.jenkins_public_subnet.id
-  route_table_id = aws_route_table.jenkins_route_table.id
 }
 
 # SECURITY GROUP
-resource "aws_security_group" "jenkins_sg" {
-  vpc_id = aws_vpc.jenkins_vpc.id
+resource "aws_security_group" "custom" {
+  name   = "${local.name}-sg"
+  vpc_id = data.aws_vpc.default.id
+
   ingress {
     from_port   = 22
     to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -99,10 +64,10 @@ resource "aws_security_group" "jenkins_sg" {
   }
 
   ingress {
-    from_port   = 443
-    to_port     = 443
+    from_port   = 50000
+    to_port     = 50000
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [data.aws_vpc.default.cidr_block]
   }
 
   egress {
@@ -112,61 +77,104 @@ resource "aws_security_group" "jenkins_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = local.tags
-
+  tags = { Name = "${local.name}-sg" }
 }
 
-# RSA KEY PAIR
-resource "tls_private_key" "foo" {
+resource "aws_network_interface" "custom" {
+  count = local.vm_count
+
+  subnet_id       = data.aws_subnets.default.ids[0]
+  security_groups = [aws_security_group.custom.id]
+
+  tags = { Name = "${local.name}-ni-${count.index + 1}" }
+}
+
+#ssh-keygen -t rsa -b 4096 -f ./keypair/id_rsa
+resource "tls_private_key" "custom" {
   algorithm = "RSA"
   rsa_bits  = 2048
 }
 
-resource "aws_key_pair" "foo" {
+resource "aws_key_pair" "custom" {
   key_name   = "id_rsa"
-  public_key = tls_private_key.foo.public_key_openssh
+  public_key = tls_private_key.custom.public_key_openssh
 }
 
-output "ssh_key" {
-  value     = tls_private_key.foo.private_key_pem
-  sensitive = true
-}
+#EC2
+resource "aws_instance" "tools_vm" {
+  depends_on = [
+    aws_network_interface.custom
+  ]
 
-# CONTROL PLANE NETWORK INTERFACE
-resource "aws_network_interface" "network_interface_jenkins" {
-  subnet_id       = aws_subnet.jenkins_public_subnet.id
-  security_groups = [aws_security_group.jenkins_sg.id]
-  tags            = merge(local.tags, { Name = "Jenkins-ENI" })
-}
+  count = local.vm_count
 
-# JENKINS INSTANCE
-resource "aws_instance" "jenkins" {
   ami           = local.ami
   instance_type = local.instance_type
-  key_name      = aws_key_pair.foo.key_name
 
-  # Attach the network interface
   network_interface {
-    network_interface_id = aws_network_interface.network_interface_jenkins.id
+    network_interface_id = aws_network_interface.custom[count.index].id
     device_index         = 0
   }
 
-  tags = merge(local.tags, { Name = "Control-Plane" })
+  credit_specification {
+    cpu_credits = "unlimited"
+  }
+
+  key_name = aws_key_pair.custom.key_name
+  tags     = { Name = "${local.name}-vm-${count.index + 1}" }
 }
 
-output "jenkins_ip" {
-  value = aws_instance.jenkins.public_ip
+output "ssh_key" {
+  value     = tls_private_key.custom.private_key_pem
+  sensitive = true
+}
+
+output "vm_ips" {
+  value = [for instance in aws_instance.tools_vm : instance.public_ip]
 }
 
 # ansible ansible-inventory -i inventory.yml --list (show the inventory)
-resource "ansible_host" "manager" {
-  name   = aws_instance.jenkins.public_ip
-  groups = ["manager"]
+resource "ansible_host" "master" {
+
+  name   = aws_instance.tools_vm[0].public_ip
+  groups = ["master"]
   variables = {
+    name                         = "master"
     ansible_user                 = "ubuntu"
     ansible_ssh_private_key_file = "id_rsa.pem"
     ansible_connection           = "ssh"
     ansible_ssh_common_args      = "-o StrictHostKeyChecking=no"
     ansible_python_interpreter   = "/usr/bin/python3"
   }
+
+}
+
+resource "ansible_host" "docker" {
+
+  name   = aws_instance.tools_vm[1].public_ip
+  groups = ["docker"]
+  variables = {
+    name                         = "docker"
+    ansible_user                 = "ubuntu"
+    ansible_ssh_private_key_file = "id_rsa.pem"
+    ansible_connection           = "ssh"
+    ansible_ssh_common_args      = "-o StrictHostKeyChecking=no"
+    ansible_python_interpreter   = "/usr/bin/python3"
+  }
+
+}
+
+resource "ansible_host" "terraform" {
+
+  name   = aws_instance.tools_vm[2].public_ip
+  groups = ["terraform"]
+  variables = {
+    name                         = "terraform"
+    ansible_user                 = "ubuntu"
+    ansible_ssh_private_key_file = "id_rsa.pem"
+    ansible_connection           = "ssh"
+    ansible_ssh_common_args      = "-o StrictHostKeyChecking=no"
+    ansible_python_interpreter   = "/usr/bin/python3"
+  }
+
 }

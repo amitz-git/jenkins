@@ -164,7 +164,7 @@
           #JENKINS_JAVA_OPTIONS: "-Djenkins.install.runSetupWizard=false
           #JENKINS_USER: "{{ ansible_user }}"
           #JENKINS_PASS: "admin123"
-          JAVA_OPTS: "-Djenkins.install.runSetupWizard=false"
+          #JAVA_OPTS: "-Djenkins.install.runSetupWizard=true"
           JENKINS_EMAIL: "{{ ansible_user }}@example.com"
           JENKINS_URL: "http://{{ ansible_ssh_host }}:8080"
           JENKINS_SLAVE_AGENT_PORT: "50000"
@@ -178,14 +178,15 @@
         host: "{{ ansible_ssh_host }}"
         port: 8080
         timeout: 30
-        delay: 10
+        delay: 25
         state: started
     
     - name: Read initial secrets
       community.docker.docker_container_exec:
         container: jenkins
         command: "cat /var/jenkins_home/secrets/initialAdminPassword"
-      register: result
+      register: initial_pwd
+      ignore_errors: true
     
     - name: Install Jenkins Plugins
       block:
@@ -207,7 +208,7 @@
         ignore_errors: true
         environment:
           JENKINS_USER_ID: admin
-          JENKINS_API_TOKEN: "{{ result.stdout }}"
+          JENKINS_API_TOKEN: "{{ initial_pwd.stdout }}"
       
       - name: who-am-i result
         ansible.builtin.debug:
@@ -218,7 +219,7 @@
           cmd: "java -jar /home/ubuntu/jenkins-cli.jar -s http://localhost:8080 install-plugin $(cat plugins.txt) -restart"
         environment:
           JENKINS_USER_ID: admin
-          JENKINS_API_TOKEN: "{{ result.stdout }}"
+          JENKINS_API_TOKEN: "{{ initial_pwd.stdout }}"
         register: plugin_install
         ignore_errors: true
       
@@ -236,7 +237,7 @@
 
     - name: Initial Admin Password
       ansible.builtin.debug:
-        msg: "Jenkins Initial Admin Password : {{ result.stdout }}"
+        msg: "Jenkins Initial Admin Password : {{ initial_pwd.stdout }}"
     
     - name: Jenkins URL
       ansible.builtin.debug:
